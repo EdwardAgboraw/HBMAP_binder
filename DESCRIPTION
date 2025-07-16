@@ -1,6 +1,6 @@
-Package: HBMAP
+Package: HBMAP_binder
 Type: Package
-Title: A hierarchical Bayesian mixture for high-throughput axon projections
+Title: Binder repo for the HBMAP package
 Version: 0.1.0
 Author: c(person("Sara", "Wade", email = "sara.wade@ed.ac.uk",
                   role = c("aut", "cre")),
@@ -48,6 +48,9 @@ Imports:
     grid,
     pracma,
     stringr,
-    ggpubr
+    ggpubr,
+    HBMAP (>= 0.1.0)
 Depends: 
     R (>= 2.10)
+Remotes:  
+    huizizhang949/HBMAP
