@@ -5,11 +5,6 @@ date: "2025-07-17"
 output: html_document
 ---
 
-
-```{r setup, include=FALSE}
-
-```
-
 We load the data and necessary functions for MCMC sampling.
 
 ```{r package}
