@@ -1,11 +1,17 @@
 ---
-title: "HBMAP Analysis of Han et al. Data"
-author: "Edward Agboraw"
-date: "2025-07-17"
+title: "HBMAP analysis of the Chen et al. (AC) data"
+author: "Huizi Zhang"
+date: "2025-07-10"
 output: html_document
 ---
 
-We load the data and necessary functions for MCMC sampling.
+This tutorial script replicates the HBMAP motif analysis of MAPseq data provided
+by [Chen et al](https://www.sciencedirect.com/science/article/pii/S0092867419310748),
+describing the projections of 3,579 neurons in the mouse auditory cortex to
+11 target areas - OFC, Motor, Rstr, SSctx, Cstr, Amyg, Vislp, VisC, AudC, Thal,
+and Tect.
+
+First, we load the data and necessary functions for MCMC sampling.
 
 ```{r package}
 # load required packages
@@ -16,17 +22,17 @@ library(HBMAP)
 ```
 
 ```{r data, warning=FALSE}
-data("data_Hans")
+data("data_barseq")
 
-M <- length(data_Hans)
-C <- sapply(1:M, function(m) ncol(data_Hans[[m]]))
-R <- dim(data_Hans[[1]])[1]
+M <- length(data_barseq)
+C <- sapply(1:M, function(m) ncol(data_barseq[[m]]))
+R <- nrow(data_barseq[[1]])
 
-# Mouse index
+regions.name <- rownames(data_barseq[[1]])
+
 mouse.index <- c(rep(1, C[1]),
                  rep(2, C[2]),
-                 rep(3, C[3]),
-                 rep(4, C[4]))
+                 rep(3, C[3]))
 ```
 
 Set empirical parameters and initial clustering.
@@ -34,13 +40,13 @@ Set empirical parameters and initial clustering.
 ```{r empirical estiamtes, out.width='60%', fig.align='center'}
 # ---------------- Empirical parameters --------
 #Initialize the clustering and set hyperparameters empirically from the data
-data_Hans_cbind <- do.call(cbind, data_Hans)
+data_barseq_cbind <- do.call(cbind, data_barseq)
 
-C_cumsum <- c(0, cumsum(sapply(1:M, function(m) ncol(data_Hans[[m]]))))
+C_cumsum <- c(0, cumsum(sapply(1:M, function(m) ncol(data_barseq[[m]]))))
 
 # initialize with k-means with cosine distance
 df <- lapply(1:M,function(m){
-  normalized_mat <- apply(data_Hans[[m]], 2, function(col) col / max(col))})
+  normalized_mat <- apply(data_barseq[[m]], 2, function(col) col / max(col))})
 
 df <- t(do.call(cbind, df))
 
@@ -51,19 +57,17 @@ cosine_normalize <- function(mat) {
 
 df <- cosine_normalize(mat = df)
 
-wss = apply(matrix(seq(6,40,1),ncol=1),1,function(x){
-  kmeans_result <- kmeans(df, centers = x, nstart = 25)
+wss = apply(matrix(seq(20,80,2),ncol=1),1,function(x){
+  kmeans_result <- kmeans(df, centers = x, iter.max = 100, nstart = 50)
   kmeans_result$tot.withinss
 })
-ggplot() + geom_point(aes(x=seq(6,40,1),y=wss)) + theme_bw()
-```
+ggplot() + geom_point(aes(x=seq(20,80,2),y=wss))
 
-```{r full algorithm}
-# Based on the plot, 20 seems like a reasonable number of clusters to start with
+# Based on the plot, 40 seems like a reasonable number of clusters to start with
 # initial clustering
-kmeans_result <- kmeans(df, centers = 20, iter.max = 100, nstart = 25)$cluster
+kmeans_result <- kmeans(df, centers = 40, iter.max = 100, nstart = 50)$cluster
 # Set the truncation to be larger to allow the model to explore more clusters
-J = 30
+J = 70
 
 clustinit <- lapply(1:M,
                     function(m) kmeans_result[(C_cumsum[m]+1):C_cumsum[m+1]])
@@ -73,30 +77,33 @@ a_alpha0  <- mean(unlist(lapply(clustinit,function(x){length(unique(x))}))/log(C
 a_alpha  <- length(unique(unlist(clustinit)))/log(sum(unlist(lapply(clustinit,function(x){length(unique(x))}))))
 
 # Set the prior expectation of gamma to scale with the total counts
-a_gamma = median(unlist(lapply(data_Hans,colSums)))
-b_gamma = 2
+a_gamma = median(unlist(lapply(data_barseq,colSums)))/2
+b_gamma = 1
 
+tau = 0.5
+nu = 1/1000
 ```
+
 
 # Infer the clustering
 
-```{r cluster}
+```{r full algorithm}
 # ---- parameters to pass to the main function ------
 # mcmc setup
-mcmc_list = list(number_iter = 5000, thinning = 1, burn_in = 4000, adaptive_prop = 0.0001,
+mcmc_list = list(number_iter = 40000, thinning = 5, burn_in = 20000, adaptive_prop = 0.0001,
                  auto_save = FALSE,
                  save_path = NULL,
                  save_frequency = 1000
                  )
 # prior parameters, default values will be used if not provided
-prior_list = list(a_gamma = a_gamma, b_gamma = b_gamma, lb_gamma = 1, a = 2, tau = 0.4, nu = 1/20,
+prior_list = list(a_gamma = a_gamma, b_gamma = b_gamma, lb_gamma = 5, a = 2, tau = tau, nu = nu,
                   a_alpha = a_alpha, b_alpha = 1, a_alpha0 = a_alpha0, b_alpha0 = 1)
 
 
 # ------- Run the full model ---------
 set.seed(3)
-mcmc_all_hans <- HBMAP_mcmc(Y = data_Hans, J = J, mcmc = mcmc_list, prior = prior_list, 
-                            Z.init = clustinit, verbose = TRUE)
+mcmc_all_barseq <- HBMAP_mcmc(Y = data_barseq, J = J, mcmc = mcmc_list, prior = prior_list, 
+                            Z.init = NULL, verbose = TRUE)
 
 ```
 
@@ -105,63 +112,66 @@ mcmc_all_hans <- HBMAP_mcmc(Y = data_Hans, J = J, mcmc = mcmc_list, prior = prio
 
 ```{r traceplots1, out.width='60%', fig.align='center'}
 # ------- MCMC check -----------
-ind <- seq(1,mcmc_all_hans$output_index,by=1)
+ind <- seq(1,mcmc_all_barseq$output_index,by=1)
 
-Zmat = matrix(unlist(mcmc_all_hans$Z_output), length(mcmc_all_hans$Z_output), sum(C),byrow = TRUE)
+Zmat = matrix(unlist(mcmc_all_barseq$Z_output), length(mcmc_all_barseq$Z_output), sum(C),byrow = TRUE)
 
 ## ----- Number of occupied components -------
 par(mfrow=c(1,1))
 k = apply(Zmat,1,function(x){length(unique(x))})
 plot(k, type = 'l')
 ```
-
-```{r conc_parameters}
-
+```{r traceplots2, out.width='80%', fig.align='center'}
 ## ---- Concentration parameters ------
 par(mfrow=c(1,2))
-plot(mcmc_all_hans$alpha_zero_output, type = 'l',ylab='',main='alpha0')
-plot(mcmc_all_hans$alpha_output, type = 'l',ylab='',main='alpha')
+plot(mcmc_all_barseq$alpha_zero_output, type = 'l',ylab='',main='alpha0')
+plot(mcmc_all_barseq$alpha_output, type = 'l',ylab='',main='alpha')
+## ----- q, gamma and weights may have label switching, better check their convergence from the post-processing step below -------
+# j=5
+# r=4
+# plot(unlist(lapply(mcmc_all_barseq$q_star_1_J_output[ind], function(q){q[j,r]})), type = 'l', ylab='', main=paste0('q[',j,',',r,']'))
+# j=5
+# plot(unlist(lapply(mcmc_all_barseq$gamma_star_1_J_output[ind], function(q){q[j]})), type = 'l', ylab='',main=paste0('gamma[',j,']'))
+# j=29
+# m=4
+# plot(unlist(lapply(mcmc_all_barseq$omega_J_M_output[ind], function(q){q[j,m]})), type = 'l', ylab='', main=paste0('w[',j,',',m,']'))
+# j=1
+# plot(unlist(lapply(mcmc_all_barseq$omega_output[ind], function(q){q[j]})), type = 'l', ylab='', main=paste0('w[',j,']'))
 
-```
-
-```{r acceptance_plots}
 
 ## ------ Acceptance rate ------
 par(mfrow=c(2,3))
-plot(unlist(mcmc_all_hans$acceptance_prob$q_star),type = 'l', ylab='', main='acceptance_q')
-plot(unlist(mcmc_all_hans$acceptance_prob$gamma_star), type = 'l', ylab='', main='acceptance_gamma')
-plot(unlist(mcmc_all_hans$acceptance_prob$alpha), type = 'l', ylab='', main='acceptance_alpha')
-plot(unlist(mcmc_all_hans$acceptance_prob$alpha_zero), type = 'l', ylab='', main='acceptance_alpha0')
-plot(unlist(mcmc_all_hans$acceptance_prob$omega), type = 'l', ylab='', main='acceptance_w')
-
-
+plot(unlist(mcmc_all_barseq$acceptance_prob$q_star),type = 'l', ylab='', main='acceptance_q')
+plot(unlist(mcmc_all_barseq$acceptance_prob$gamma_star), type = 'l', ylab='', main='acceptance_gamma')
+plot(unlist(mcmc_all_barseq$acceptance_prob$alpha), type = 'l', ylab='', main='acceptance_alpha')
+plot(unlist(mcmc_all_barseq$acceptance_prob$alpha_zero), type = 'l', ylab='', main='acceptance_alpha0')
+plot(unlist(mcmc_all_barseq$acceptance_prob$omega), type = 'l', ylab='', main='acceptance_w')
 ```
 
 ## Optimal clustering
 
 ```{r optimal clustering, out.width='60%', fig.align='center', warning=FALSE}
 
-
 # Posterior similarity matrix
-psm_hans = similarity_matrix(mcmc_run_all_output = mcmc_all_hans)
+psm_barseq = similarity_matrix(mcmc_run_all_output = mcmc_all_barseq)
 
 
 # Reordered posterior samples of z
-hans_z_reordered <- z_trace_updated(mcmc_run_all_output = mcmc_all_hans)
+barseq_z_reordered <- z_trace_updated(mcmc_run_all_output = mcmc_all_barseq)
 
 
 # optimal clustering
 set.seed(1)
-hans_Z <- opt.clustering.comb(z_trace = hans_z_reordered,
-                              post_similarity = psm_hans$psm.combined,
-                              max.k = max(k))
+barseq_Z <- opt.clustering.comb(z_trace = barseq_z_reordered,
+                                post_similarity = psm_barseq$psm.combined,
+                                max.k = max(k))
 
 
 #-- Convert to a list
 C_cumsum <- c(0, cumsum(C))
 
-hans_Z <- lapply(1:M,
-                function(m) hans_Z[(C_cumsum[m]+1):C_cumsum[m+1]])
+barseq_Z <- lapply(1:M,
+                   function(m) barseq_Z[(C_cumsum[m]+1):C_cumsum[m+1]])
 
 ```
 
@@ -171,9 +181,16 @@ Posterior similarity matrix can be used to quantify the uncertainty in clusterin
 # Plot of posterior similarity matrix with separation of mice (set group=FALSE to remove separation)
 # Note that this function may take long to run if there is a large number of neurons
 psm_hans_plot <- plotpsm(psm.ind = psm_hans$psm.within,
-                         psm.tot = psm_hans$psm.combined)
-
+                         psm.tot = psm_hans$psm.combined,
+                         group = TRUE)
 psm_hans_plot
+
+# To plot posterior similarity matrix for a single mouse, provide the index
+# psm_hans_plot_single <- plotpsm(psm.ind = psm_hans$psm.within,
+#                                 psm.tot = psm_hans$psm.combined,
+#                                 index = 1)
+# 
+# psm_hans_plot_single
 ```
 
 
@@ -181,21 +198,20 @@ psm_hans_plot
 
 ```{r post-processing step}
 
-
-mcmc_list = list(number_iter = 5000, thinning = 1, burn_in = 4000, adaptive_prop = 0.0001,
+mcmc_list = list(number_iter = 15000, thinning = 5, burn_in = 5000, adaptive_prop = 0.0001,
                  auto_save = FALSE,
                  save_path = NULL,
                  save_frequency = 1000
                  )
-prior_list = list(a_gamma = a_gamma, b_gamma = b_gamma, lb_gamma = 1, a = 2, tau = 0.4, nu = 1/20,
+prior_list = list(a_gamma = a_gamma, b_gamma = b_gamma, lb_gamma = 5, a = 2, tau = tau, nu = nu,
                   a_alpha = a_alpha, b_alpha = 1, a_alpha0 = a_alpha0, b_alpha0 = 1)
 
 # for the post-processing step, there is no label switching and we can make inference for each cluster based on q, gamma and weights
 post_list = list(run_omega = TRUE, run_q_gamma = TRUE)
 
 set.seed(3)
-mcmc_hans_post <- HBMAP_mcmc(Y = data_Hans, mcmc = mcmc_list, prior = prior_list, 
-                             Z.fix = hans_Z, post = post_list, verbose = FALSE)
+mcmc_barseq_post <- HBMAP_mcmc(Y = data_barseq, mcmc = mcmc_list, prior = prior_list, 
+                               Z.fix = barseq_Z, post = post_list, verbose = TRUE)
 ```
 
 We reorder the clusters based on estimated projection strengths.
@@ -205,47 +221,41 @@ We reorder the clusters based on estimated projection strengths.
 ### ----- return reordered samples as well for q, gamma and omegas ------
 ### ----- return summary statistics for q and gamma, and cluster labels (projected regions) ------
 ### ----- this is based on the probability of projections strength greater than a threshold (q_tilde) -------------
-mcmc_hans_post_reorder <- mcmc_reorder_cluster(post_output = mcmc_hans_post, 
-                                               Z = hans_Z, regions.name = rownames(data_Hans[[1]]))
+mcmc_barseq_post_reorder <- mcmc_reorder_cluster(post_output = mcmc_barseq_post, 
+                                                 Z = barseq_Z, regions.name = rownames(data_barseq[[1]]))
 
 # Neuron allocations after reordering
-hans_Z_reordered <- mcmc_hans_post_reorder$Z
+barseq_z_reordered <- mcmc_barseq_post_reorder$Z
 ```
 
 Below we summarize cluster size, visualize neuron projection strengths within each cluster and estimated projection strength.
 
 ```{r cluster summary and line plots, message=FALSE, out.width='70%', fig.align='center'}
-
 # you can choose your preferred color palette (change 'col' argument)
 ## ------ cluster size: number of neurons in each cluster, colored by group (mouse/injection site) ---------
-opt.clustering.frequency(clustering = hans_Z_reordered, group.index = mouse.index, group.name = 'mouse', 
+opt.clustering.frequency(clustering = barseq_z_reordered, group.index = mouse.index, group.name = 'mouse', 
                          title = 'Cluster size')
 
-
 ## ---------- Heatmap of empirical projection strength of neurons in each cluster, colored by group (mouse/injection site) ----------
-heatmap_ps(Y = data_Hans, Z = hans_Z_reordered, regions.name = rownames(data_Hans[[1]]), 
+heatmap_ps(Y = data_barseq, Z = barseq_z_reordered, regions.name = rownames(data_barseq[[1]]), 
            group.index = mouse.index, group.name = 'mouse',
-           cluster.index = 1:length(unique(unlist(hans_Z_reordered))), title = '')
-
+           cluster.index = 1:length(unique(unlist(barseq_z_reordered))), title = '')
 
 
 ## --------- Line plot for of empirical projection strengths within each cluster ------------------------
-plot_empirical_ps(Y = data_Hans, Z = hans_Z_reordered, 
-                  cluster.labels = mcmc_hans_post_reorder$cluster.labels,
-                  regions.name = rownames(data_Hans[[1]]),
+plot_empirical_ps(Y = data_barseq, Z = barseq_z_reordered, 
+                  cluster.labels = mcmc_barseq_post_reorder$cluster.labels,
+                  regions.name = rownames(data_barseq[[1]]),
                   group.index = mouse.index, group.name = 'mouse',
-                  cluster.index = 1:length(unique(unlist(hans_Z_reordered))),
-                  title = 'Empirical projection strength', facet_ncol = 5)
-
+                  cluster.index = 1:length(unique(unlist(barseq_z_reordered))),
+                  title = 'Empirical projection strength', facet_ncol = 6)
 
 # ---------- Line plot of estimated projection strength within each cluster ----------
 # get summary statistics
-ps_summary <- ps_summarize(post_output_reorder = mcmc_hans_post_reorder)
+ps_summary <- ps_summarize(post_output_reorder = mcmc_barseq_post_reorder)
 # plot
-plot_estimated_ps(ps_summary = ps_summary, cluster.index = 1:length(unique(unlist(hans_Z_reordered))), 
-                  title = 'Estimated projection strength', facet_ncol = 5)
-
-
+plot_estimated_ps(ps_summary = ps_summary, cluster.index = 1:length(unique(unlist(barseq_z_reordered))), 
+                  title = 'Estimated projection strength', facet_ncol = 8)
 
 ```
 
@@ -256,23 +266,21 @@ Below we find prominent motifs based on the posterior samples of the global weig
 # ------- Find prominent motifs: Probability of the global weight greater than a threshold ------- 
 # prominent motifs are defined as those with a high probability (> 0.95)
 # below the function returns the indices of prominent motifs and the posterior probability of the global weight greater than thresh
-prominent_motifs <- identify_prominent_motif(post_output_reorder = mcmc_hans_post_reorder, 
-                                             thresh = 0.02, prob = 0.95)
-#> [1] "With a threshold of 0.02 we identify motifs where we would expect at least 11.06 neurons in that motif across all mice"
+prominent_motifs <- identify_prominent_motif(post_output_reorder = mcmc_barseq_post_reorder, 
+                                             thresh = 0.007, prob = 0.95)
 ```
 
 We could plot the estimated and empirical projection strengths for these prominent motifs only.
 
 ```{r plot prominent motifs, out.width='70%', fig.align='center'}
 # redo the lines plots of empirical and estimated projection strengths for prominent motifs only
-plot_empirical_ps(Y = data_Hans, Z = hans_Z_reordered, 
-                  cluster.labels = mcmc_hans_post_reorder$cluster.labels,
-                  regions.name = rownames(data_Hans[[1]]),
+plot_empirical_ps(Y = data_barseq, Z = barseq_z_reordered, 
+                  cluster.labels = mcmc_barseq_post_reorder$cluster.labels,
+                  regions.name = rownames(data_barseq[[1]]),
                   group.index = mouse.index, group.name = 'mouse', 
                   cluster.index = prominent_motifs$index, 
                   title = 'Empirical projection strength (prominent motif)', 
                   facet_ncol = 4)
-
 plot_estimated_ps(ps_summary = ps_summary, cluster.index = prominent_motifs$index, 
                   title = 'Estimated projection strength (prominent motif)', facet_ncol = 5)
 ```
@@ -282,14 +290,14 @@ In addition, we can investigate the posterior probabilities of allocation to the
 
 ```{r allocation prob, out.width='60%',out.height='60%' ,fig.align='center'}
 # line plots of empirical projection strengths colored by allocation probabilities
-allo.prob = allocation_probability(post_output_reorder = mcmc_hans_post_reorder, 
-                                   Y = data_Hans)
+allo.prob = allocation_probability(post_output_reorder = mcmc_barseq_post_reorder, 
+                                   Y = data_barseq)
 
-projection_probability(Y = data_Hans, Z = hans_Z_reordered, 
-                       cluster.labels = mcmc_hans_post_reorder$cluster.labels,
-                       regions.name = rownames(data_Hans[[1]]),
+projection_probability(Y = data_barseq, Z = barseq_z_reordered, 
+                       cluster.labels = mcmc_barseq_post_reorder$cluster.labels,
+                       regions.name = rownames(data_barseq[[1]]),
                        allocation_prob = allo.prob,
-                       cluster.index = 1:length(unique(unlist(hans_Z_reordered))))
+                       cluster.index = 1:length(unique(unlist(barseq_z_reordered))))
 ```
 
 ```{r superheat heatmap, out.width='60%',out.height='60%', fig.align='center'}
@@ -299,11 +307,11 @@ projection_probability(Y = data_Hans, Z = hans_Z_reordered,
 # install.packages("devtools")
 # devtools::install_github("rlbarter/superheat")
 library(superheat)
-Z_factored = as.character(unlist(hans_Z_reordered))
-ind = sapply(unlist(hans_Z_reordered), function(z){
+Z_factored = as.character(unlist(barseq_z_reordered))
+ind = sapply(unlist(barseq_z_reordered), function(z){
   any(z == prominent_motifs$index)
 })
-superheat(psm_hans$psm.combined[ind,ind],
+superheat(psm_barseq$psm.combined[ind,ind],
           pretty.order.rows = TRUE,
           pretty.order.cols = TRUE,
           heat.pal = c("white", "yellow", "red"),
@@ -320,7 +328,7 @@ superheat(psm_hans$psm.combined[ind,ind],
 We identify variable motifs by comparing the variance of the brain-specific weights across mice with a null model.
 
 ```{r variable motif}
-mcmc_list = list(number_iter = 5000, thinning = 1, burn_in = 4000, adaptive_prop = 0.0001,
+mcmc_list = list(number_iter = 15000, thinning = 5, burn_in = 5000, adaptive_prop = 0.0001,
                  auto_save = FALSE,
                  save_path = NULL,
                  save_frequency = 1000
@@ -329,13 +337,13 @@ post_list <- list(run_omega=TRUE, run_q_gamma=FALSE)
 # increase N to obtain more reliable results, e.g. N=200
 # For windows users, use cluster_type='PSOCK',
 set.seed(2)
-local_weights_analysis_vc <- local_weights_analysis(N = 50, Z = mcmc_hans_post_reorder$Z, 
-                                                    omega_output = mcmc_hans_post_reorder$omega_output,
-                                                    omega_J_M_output = mcmc_hans_post_reorder$omega_J_M_output, 
+local_weights_analysis_vc <- local_weights_analysis(N = 50, Z = mcmc_barseq_post_reorder$Z, 
+                                                    omega_output = mcmc_barseq_post_reorder$omega_output,
+                                                    omega_J_M_output = mcmc_barseq_post_reorder$omega_J_M_output, 
                                                     prior = prior_list, mcmc = mcmc_list, 
                                                     post = post_list, n_cores=4, 
-                                                    cluster_type = 'PSOCK',
-                                                    verbose = FALSE)
+                                                    cluster_type = 'FORK',
+                                                    verbose = TRUE)
 
 ```
 
@@ -343,7 +351,7 @@ The results are summarized in the following figures.
 
 ```{r variable motif plot, out.width='60%', fig.align='center'}
 # local weights variance
-w_jm_empirical <- mcmc_hans_post_reorder$omega_J_M_output
+w_jm_empirical <- mcmc_barseq_post_reorder$omega_J_M_output
 w_jm_variance_empirical <- lapply(1:length(w_jm_empirical),
                                   function(t) matrix(apply(w_jm_empirical[[t]], 1, var),
                                                      nrow = 1))
@@ -359,13 +367,11 @@ local_weights_analysis_vc %>%
   xlab('variance of local weights')+
   ylab('probability of observing larger variance')+
   geom_hline(yintercept = 0.95)
-#> Warning: ggrepel: 8 unlabeled data points (too many overlaps). Consider
-#> increasing max.overlaps
 
 # global weights
-local_weights_analysis_vc$global_weight = apply(matrix(unlist(mcmc_hans_post_reorder$omega_output), 
-                                                       length(unique(unlist(hans_Z_reordered))), 
-                                                       length(mcmc_hans_post_reorder$omega_output)),1,mean)
+local_weights_analysis_vc$global_weight = apply(matrix(unlist(mcmc_barseq_post_reorder$omega_output), 
+                                                       length(unique(unlist(barseq_z_reordered))), 
+                                                       length(mcmc_barseq_post_reorder$omega_output)),1,mean)
 local_weights_analysis_vc$probability_global = prominent_motifs$prob
 
 local_weights_analysis_vc %>%
@@ -377,8 +383,6 @@ local_weights_analysis_vc %>%
   ylab('probability of global weight>0.02')+
   geom_hline(yintercept = 0.95) +
   geom_vline(xintercept = 0.02)
-#> Warning: ggrepel: 6 unlabeled data points (too many overlaps). Consider
-#> increasing max.overlaps
 ```
 
 ## Total variation distance between mice
@@ -387,8 +391,11 @@ We quantify differences between mice based on the total variation (TV) distance 
 
 ```{r TV distance, out.width='80%', fig.align='center'}
 ## ---- plot a heatmap for the posterior mean (and optionally labelled by credible intervals) of the tv_distance ----
-plot_tv_distance(mcmc_run_all_output = mcmc_all_hans, hpd = TRUE, prob = 0.95, text_size = 4)
+plot_tv_distance(mcmc_run_all_output = mcmc_all_barseq, hpd = TRUE, prob = 0.95, text_size = 4)
 ```
+
+
+
 
 ## Summary
 
@@ -397,17 +404,17 @@ Overall we can summarize the estimated projection strength, global and local wei
 ```{r summary plot, out.width='80%', fig.align='center'}
 # ------ Summary plot ---------
 # posterior expected number of counts/N for each region 
-eps <- lapply(1:M, function(m) post_epstrength(m,mcmc_all_hans))
+eps <- lapply(1:M, function(m) post_epstrength(m,mcmc_all_barseq))
 
 # summarize the posterior mean of q, omega, omega_JM (reordered)
-params_summ <- list(proj_prob = mcmc_hans_post_reorder$proj_prob_mean, 
-                    omega_JM = Reduce('+', mcmc_hans_post_reorder$omega_J_M_output)/length(mcmc_hans_post_reorder$omega_J_M_output),
-                    omega = colMeans(do.call(rbind, mcmc_hans_post_reorder$omega_output)))
+params_summ <- list(proj_prob = mcmc_barseq_post_reorder$proj_prob_mean, 
+                    omega_JM = Reduce('+', mcmc_barseq_post_reorder$omega_J_M_output)/length(mcmc_barseq_post_reorder$omega_J_M_output),
+                    omega = colMeans(do.call(rbind, mcmc_barseq_post_reorder$omega_output)))
 
 plot_summary(params = params_summ, eps = eps, prominent_motifs_prob = prominent_motifs$prob, 
-             prominent_motifs_thresh = 0.95, global_weight_thresh = 0.01,
-             data.source.label = 'Mouse', regions.name = rownames(data_Hans[[1]]), 
-             col_bar = c("deepskyblue","darkgrey","darkturquoise","aquamarine"), col_mat = c('white','blue'), 
+             prominent_motifs_thresh = 0.95, global_weight_thresh = 0.007,
+             data.source.label = 'Mouse', regions.name = rownames(data_barseq[[1]]), 
+             col_bar = c("deepskyblue","darkgrey","aquamarine"), col_mat = c('white','blue'), 
              legend = TRUE, legend_x = 0.6)
 ```
 
@@ -420,36 +427,20 @@ For posterior predictive checks, we generate replicated data from the posterior 
 ## --- a single replicate -----
 # compare empirical projection strengths for each mouse
 set.seed(3)
-ppc_single_result <- ppc_single(mcmc_run_all_output = mcmc_all_hans,
-                                Y = data_Hans,
-                                regions.name = rownames(data_Hans[[1]]))
-m=2
+ppc_single_result <- ppc_single(mcmc_run_all_output = mcmc_all_barseq,
+                                Y = data_barseq,
+                                regions.name = rownames(data_barseq[[1]]))
+m=3
 print(ppc_single_result[[m]])
-#> `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
-
 
 ## ----- multiple replicate: compare number of zero counts for each region (barplot) ------
 ### ------ compare distribution of non-zero counts for each region (boxplot) -----------
 
-ppc_multiple_result <- ppc_multiple(mcmc_run_all_output = mcmc_all_hans,
-                                   Y = data_Hans,
+ppc_multiple_result <- ppc_multiple(mcmc_run_all_output = mcmc_all_barseq,
+                                   Y = data_barseq,
                                    N = 3,
-                                   regions.name = rownames(data_Hans[[1]]))
+                                   regions.name = rownames(data_barseq[[1]]))
 ppc_multiple_result$zero.plot
-
 ppc_multiple_result$non.zero.plot
 ```
-
-## Generate synthetic data with dissection noise
-
-```{r synthetic_data}
-
-set.seed(5)
-Y_sim <- data_simulation(mcmc_run_all_output = mcmc_all_hans, Y = data_Hans, 
-                         regions.name = rownames(data_Hans[[1]]), 
-                         M = 4, C = C, noise.levels = list(0.01,0.05))
-
-```
-
-
 
