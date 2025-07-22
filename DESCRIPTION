@@ -12,7 +12,8 @@ Depends:
     ggrepel,
     HBMAP,
     knitr,
-    rmarkdown
+    rmarkdown,
+    superheat
 Remotes: 
     huizizhang949/HBMAP
 Encoding: UTF-8
