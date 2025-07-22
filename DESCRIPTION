@@ -11,9 +11,9 @@ Depends:
     ggplot2,
     ggrepel,
     HBMAP,
+    superheat,
     knitr,
-    rmarkdown,
-    superheat
+    rmarkdown
 Remotes: 
     huizizhang949/HBMAP,
     rlbarter/superheat
