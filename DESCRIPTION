@@ -15,6 +15,7 @@ Depends:
     rmarkdown,
     superheat
 Remotes: 
-    huizizhang949/HBMAP
+    huizizhang949/HBMAP,
+    rlbarter/superheat
 Encoding: UTF-8
 LazyData: true
