@@ -5,7 +5,7 @@ date: "2025-07-17"
 output: html_document
 ---
 
-This tutorial script replicates the HBMAP motif analysis of MAPseq data provided
+This script showcases the HBMAP motif analysis of MAPseq data provided
 by [Han et al](https://www.nature.com/articles/nature26159), describing the 
 projections of 553 neurons in the mouse primary visual area (V1) to six higher 
 visual areas - LI, LM, AL, AM, PM and RL.
